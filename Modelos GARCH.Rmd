@@ -1,0 +1,289 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+
+#datos de precios de las acciones de ecopetro, bancolombia isa y colcap desde noviembre de 2007 con periodicidad diaria
+library(readxl)
+Acciones <- read_excel("Acciones.xlsx")
+View(Acciones)
+attach(Acciones)
+#252 son el numero aproximado de días hábiles en Colombia
+y<-ts(`BANCOLOMBIA`,frequency = 252, start=c(2007,11))
+fechas=seq(as.Date("2007/11/27"), length.out = length(y), by="day")
+
+y1<-ts(`COLCAP`,frequency = 252, start=c(2007,11))
+fechas=seq(as.Date("2007/11/27"), length.out = length(y), by="day")
+
+
+```
+
+
+```{r}
+install.packages("TSA")
+install.packages("tseries")
+install.packages("corrgram")
+install.packages("forecast")
+install.packages("fGarch")
+install.packages("timeDate")
+install.packages("timeSeries")
+install.packages("fBasics")
+install.packages("lmtest")
+install.packages("rugarch")
+
+library(TSA)
+library(tseries)
+library(corrgram)
+library(forecast)
+library(fGarch)
+library(timeDate)
+library(timeSeries)
+library(fBasics)
+library(lmtest)
+library(rugarch)
+
+```
+
+## Including Plots
+
+```{r}
+#Gráfica de la serie
+ts.plot(`y`, main="Precio de cierre")
+
+ts.plot(`y1`, main="Precio de cierre colcap")
+#Transformar la serie usualmente se usa la diferencia logarítmica que es el logaritmo de la variación porcentual 
+retorno<-diff(log(y))
+retorno1<-diff(log(y1))
+ts.plot(`retorno`, main="Retorno")
+ts.plot(`retorno1`, main="Retorno1")
+
+```
+
+
+```{r}
+#Prueba de estacionariedad
+adf.test(y)
+adf.test(retorno)
+adf.test(y1)
+adf.test(retorno1)
+```
+
+
+```{r}
+#Funciones de autocorrelación
+#cuando se resaltan todos los rezagos en la simple como ocurre en este caso en la funcion de autocorrelación simple , significa que la serie no es estacionaria
+#como no lo estamos calculando sobre la y sino sobre el retorno, deberíamos identificar los rezagos en las gráficas de los retornos 
+
+#se puede observar que para el simple casi que no hay ninguno, solamente unos muy alejados en el pasado y esos no nos interesan  y en el parcial pasa lo mismo 
+par(mfrow=c(1,1))
+acf(y,lag.max = 36)
+pacf(y,lag.max = 36)
+acf(retorno,lag.max = 36)
+pacf(retorno,lag.max = 36)
+
+acf(y1,lag.max = 36)
+pacf(y1,lag.max = 36)
+acf(retorno1,lag.max = 36)
+pacf(retorno1,lag.max = 36)
+#entonces como no tiene sentido un modelo 34 34 porque sería muy grande, hago lo siguiente:
+
+```
+
+```{r}
+### Normalidad
+#no voy a sacar los errores porque no tengo modelo, entonces voy a asumir que mis errores son iguales a mi y (del nuevo modelo), entonces ese retorno es igual al termino aleatorio  Yt=Et entonces retorno = Et
+#pasos para estimar un modelo arch en este caso antes generabamos estas pruebas sobre el error, ahora las generamos sobre el retorno 
+#1.Hallar una ecuación de la media para Yt, en este caso decirmos que el retorno es igual al error o retorno= Et
+#2. Validar los supuestos (Retorno  = Error )
+#No autocorrelación sobre el retorno (si lo cumple y menos mal porque es obligatorio, esta es la excusa de haber usado la y directamente )
+#normalidad sobre el retorno (por ahora no se tiene)
+#Test de efectos arch sobre el retorno (si hay heterocedasticidad) 
+# comocumplimos las condiciones entonces podemos pasar al siguiente paso que es la estimación del modelo
+
+par(mfrow=c(1,2))
+qqnorm(scale(retorno))
+qqline(scale(retorno),col="blue")
+
+histograma<-function(retorno, nbreaks=12) {
+  hist(retorno, breaks=nbreaks, freq=FALSE, main="Histograma de residuales")
+  rug(jitter(retorno), col="red")
+  curve(dnorm(x,mean=mean(retorno), sd=sd(retorno)), add=TRUE, col="blue", lwd=2)
+  lines(density(retorno)$x, density(retorno)$y, col="yellow", lwd=2, lty=2)
+}
+par(mfrow=c(1,1))
+histograma(retorno)
+
+jarque.bera.test(retorno)
+ks.test(retorno,"pnorm")
+
+
+par(mfrow=c(1,2))
+qqnorm(scale(retorno1))
+qqline(scale(retorno1),col="blue")
+
+histograma<-function(retorno1, nbreaks=12) {
+  hist(retorno1, breaks=nbreaks, freq=FALSE, main="Histograma de residuales colcap")
+  rug(jitter(retorno1), col="red")
+  curve(dnorm(x,mean=mean(retorno1), sd=sd(retorno1)), add=TRUE, col="blue", lwd=2)
+  lines(density(retorno1)$x, density(retorno1)$y, col="yellow", lwd=2, lty=2)
+}
+par(mfrow=c(1,1))
+histograma(retorno1)
+
+jarque.bera.test(retorno1)
+ks.test(retorno1,"pnorm")
+
+```
+
+
+```{r}
+### No autocorrelación
+plot(scale(retorno),type="l",main="Residuales")
+par(mfrow=c(1,2))
+acf(retorno)
+pacf(retorno)
+
+acf_e1 <- acf(retorno, plot=FALSE, lag.max=36)$acf
+pacf_e1 <- pacf(retorno, plot=FALSE, lag.max=36)$acf
+
+Q_stats <- c()
+Q_pvals <- c()
+for (i in 1:36) {
+  Q = Box.test(retorno, lag=i)
+  Q_stats[[i]] <- Q$statistic
+  Q_pvals[[i]] <- Q$p.value
+}
+corrgram <- cbind(LAG=seq(1,36), ACF=acf_e1, PACF=pacf_e1, Q=Q_stats, "Prob>Q"=Q_pvals)
+corrgram
+
+
+plot(scale(retorno1),type="l",main="Residuales colcap")
+par(mfrow=c(1,2))
+acf(retorno1)
+pacf(retorno1)
+
+acf_e1 <- acf(retorno1, plot=FALSE, lag.max=36)$acf
+pacf_e1 <- pacf(retorno1, plot=FALSE, lag.max=36)$acf
+
+Q_stats <- c()
+Q_pvals <- c()
+for (i in 1:36) {
+  Q = Box.test(retorno1, lag=i)
+  Q_stats[[i]] <- Q$statistic
+  Q_pvals[[i]] <- Q$p.value
+}
+corrgram <- cbind(LAG=seq(1,36), ACF=acf_e1, PACF=pacf_e1, Q=Q_stats, "Prob>Q"=Q_pvals)
+corrgram
+
+```
+
+
+```{r}
+###Homocedasticidad
+e1_cuad=(retorno-mean(retorno))^2
+
+par(mfrow=c(1,2))
+acf(e1_cuad)
+pacf(e1_cuad)
+
+acf_e1c <- acf(e1_cuad, plot=FALSE, lag.max=12)$acf
+pacf_e1c <- pacf(e1_cuad, plot=FALSE, lag.max=12)$acf
+
+Q_stats <- c()
+Q_pvals <- c()
+for (i in 1:12) {
+  Q = Box.test(e1_cuad, lag=i)
+  Q_stats[[i]] <- Q$statistic
+  Q_pvals[[i]] <- Q$p.value
+}
+corrgram <- cbind(LAG=seq(1,12), ACF=acf_e1c, PACF=pacf_e1c, Q=Q_stats, "Prob>Q"=Q_pvals)
+corrgram
+
+
+e1_cuad1=(retorno-mean(retorno1))^2
+
+par(mfrow=c(1,2))
+acf(e1_cuad1)
+pacf(e1_cuad1)
+
+acf_e1c1 <- acf(e1_cuad1, plot=FALSE, lag.max=12)$acf
+pacf_e1c1 <- pacf(e1_cuad1, plot=FALSE, lag.max=12)$acf
+
+Q_stats <- c()
+Q_pvals <- c()
+for (i in 1:12) {
+  Q = Box.test(e1_cuad1, lag=i)
+  Q_stats[[i]] <- Q$statistic
+  Q_pvals[[i]] <- Q$p.value
+}
+corrgram <- cbind(LAG=seq(1,12), ACF=acf_e1c1, PACF=pacf_e1c1, Q=Q_stats, "Prob>Q"=Q_pvals)
+corrgram
+
+```
+```{r}
+G1=garchFit(~arma(0,0)+garch(1,1),data=retorno1,trace=FALSE,cond.dist = c("norm")) 
+summary(G1)
+```
+
+
+```{r}
+###3.Estimar modelo de heterocedasticidad condicionada GJR
+#por medio de la funcion de autocirrelacion simple y parcial de la prueba de heterocedasticidad 
+#como no dio normal eso quiere decir que tenemos asimetria 
+# hay muchisimos rezagos que resaltan entonces para construir mi modelo tengo 3 opciones
+#1. elegir los rezagos mas altos 
+#2. elegir unos rezagos intermedios
+#empezar con los rezagos más simples
+#esta funcion pregunta primero por la varianza, después el modelo, en este caso vamos a calcular un gjr GARch que es el del umbral osea el tarch, tambien podría ser egarch que es el exponencial  el siguiente argumento es la estimacion del orden del garch, puedo incluirle también la ecuacion de la media en cuyo caso necesito un modlo arma pero como no use un modelo arma por eso va 0,0, el siguiente argumento me pregunta que si quiero o no quiero media, en este caso le ponemos true osea que si, los otros si quiero aplicar un modelo arch o un arfima que en este caso no aplican y por ultimo el tipo de distribucion, en este caso ponemos distribucion t student porque ya sabemos que no es normal 
+mod1<-ugarchspec(variance.model=list(model="gjrGARCH",garchOrder=c(1,1)), mean.model=list(armaOrder=c(0,0),include.mean=FALSE, archm=FALSE,arfima=FALSE),distribution.model="std")
+modelo<-ugarchfit(spec=mod1,data=retorno)
+show(modelo)
+#esta salida nos muestra si hay un sesgo, nos dice que hay sesgo positivo al 10% de significancia
+#mu es el intercepto de la ecuación por haberle dicho true antes a incluir la media da 0.068691 si estoy usando un alfa del 5% entonces esa media es no significativa entonces puedo omitirla si tomo uno del 10% la podría dejar y eso me permitiria afirmar que la accion ha tenido un promedio de 0,004 
+#el omega corresponde al componente constante de la varianza 
+#alpha corresponde al componente arch 
+#beta corresponde al componente garch 
+#gamma corresponde al asimetrico del gjr
+#shape corresponde a la forma de la distribucion que estoy asumiendo que es t student
+#esos elementos en conjunto me permiten tener una estimación
+#luego me genera una aproximación con errores estandar robustos esto lo que hace es disminuir la probabilidad de que los coeficientes no sean significativos 
+#si el p valor da menor al alfa son significativos 
+#para definir si el modelo es adecuado lo que se hace es validar supuestos sobre los errores 
+#para eso genera un jung box que es para la no autocorrelacion, podemos ver que son superiores al alfa del 5% es decir que no hay autocorrelacion osea cumple con el supuesto  
+#luego tengo el test de jung box pero sobre los errores al cuadrado, esto es una prueba de heterocedasticidad y como todos dan mayor al 5% entonces no habría heterocedasticidad, se corrigió osea que tambien cumple
+#cuando lo miro directamente con el test de efectos arch el p valor tambien es mayor al alfa no se rechaza la hipotesis nula osea que pued afirmar que cumple heterocedasticidad
+#el modelo garch 1,1 funciona!
+#luego genera unos valores críticos asintóticos y genera una bondad de ajuste para mirar si en conjunto se comporta o no de manera adecuada, todos estos p valor dan menores al alfa entonces lo que significa que si es una buena bondad de ajuste 
+#en conclusion ese modelo que estimamos es un buen modelo para el retorno del precio de la accion de bancolombia 
+#ahora la ecuación 
+
+
+
+
+mod3<-ugarchspec(variance.model=list(model="gjrGARCH",garchOrder=c(1,1)), mean.model=list(armaOrder=c(0,0),include.mean=FALSE, archm=FALSE,arfima=FALSE),distribution.model="std")
+modelo3<-ugarchfit(spec=mod3,data=retorno1)
+show(modelo3)
+```
+
+
+```{r}
+###Estimar modelo de heterocedasticidad condicionada eGARCH
+mod2<-ugarchspec(variance.model=list(model="eGARCH",garchOrder=c(1,1)), mean.model=list(armaOrder=c(0,0),include.mean=FALSE, archm=FALSE,arfima=FALSE),distribution.model="ged")
+modelo2<-ugarchfit(spec=mod2,data=retorno)
+show(modelo2)
+#tambien cumple con los supuestos, entonces cual es mejor? pues usamos los criterios de informacion akaike bayes shibata hannan quinn para elegir el mejor el que tenga estos valores más pequeños
+
+```
+
+
+```{r}
+###Estimar modelo de heterocedasticidad condicionada
+m2=garchFit(~garch(1,1),data=retorno,trace=FALSE,cond.dist = c("std")) 
+summary(m2)
+#los modelos tarch y egarch se usan sobretodo cuando hay asimetria
+```
+
+
+
